@@ -1,3 +1,0 @@
-# test-connection
-
-Verbindungstest erfolgreich.
