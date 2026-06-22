@@ -1,0 +1,3 @@
+# test-connection
+
+Verbindungstest erfolgreich.
