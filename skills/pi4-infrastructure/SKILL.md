@@ -1,71 +1,82 @@
 # pi4-infrastructure
 
-**Trigger:** Verwende diesen Skill bei allem was den Raspberry Pi 4 (Bambuddy/Pi4) betrifft: Docker-Container, skill-writer, ssh-mcp, Bambuddy, Tailscale, Dateitransfer, Remote-Befehle vom HA aus.
+**Trigger:** Verwende diesen Skill bei allem was den Raspberry Pi 4 (bambuddy/Pi4) betrifft: Docker-Container, skill-writer, ssh-mcp, Bambuddy, Tailscale, Dateitransfer, Remote-Befehle.
 
-**Stand:** 2026-06-23 (live abgefragt + deployed)
+**Stand:** 2026-06-24
 
 ---
 
 ## Hardware
 
 - **Gerät:** Raspberry Pi 4
-- **Hostname:** pummelchen (User: pummelchen)
+- **Hostname:** bambuddy (User: pummelchen)
 - **IP lokal:** 192.168.178.112
 - **Tailscale IP:** 100.125.201.7
 - **Tailscale Subnet-Router:** 192.168.178.0/24
 
 ---
 
-## Docker-Container (1 Container, 2 Services)
+## Docker-Container (getrennte Container)
 
-### skill-writer-mcp (aktiv, kombinierter Server)
+Seit 2026-06-24 laufen skill-writer und ssh-mcp in **getrennten Containern**.
 
-Einzelner Container mit zwei FastMCP-Services die parallel laufen:
-
-| Service | Port | Intern | Extern |
+| Container | Port | Transport | Endpoint |
 |---|---|---|---|
-| skill-writer | 8001 | `/sse` | `https://bambuddy.tail5738ee.ts.net/sse` |
-| ssh-mcp | 8002 | `/sse` | lokal only (kein Funnel aktiv) |
+| skill-writer-mcp | 8001 | streamable-http | `/mcp` |
+| ssh-mcp | 8002 | streamable-http | `/mcp` |
+| bambuddy | intern | – | Port 8000 |
+| portainer | 9000 | – | Web-UI |
 
+### skill-writer-mcp
+- **Projektverzeichnis:** `~/skill-writer-mcp/`
 - **Image:** python:3.12-slim (selbst gebaut)
-- **Abhängigkeiten:** fastmcp, httpx
-- **Container-Name:** `skill-writer-mcp`
-- **Projektverzeichnis Pi4:** `~/skill-writer-mcp/`
-- **Einstiegspunkt:** `server.py` (kombinierter Server)
-- **Start:** `threading.Thread` für skill-writer (8001), Hauptprozess ssh-mcp (8002)
+- **Abhängigkeiten:** fastmcp 3.4.2, httpx
+- **Transport:** `streamable-http` auf Port 8001, lauscht auf `/mcp`
+- **GitHub-Repo:** `krueli/claude-skills`, Branch `main`, Unterverzeichnis `skills/`
+- **GitHub-Token:** via Env `GITHUB_TOKEN` im docker-compose.yml
 
-### Bambuddy (separater Prozess/Container)
-- Monitoring für BambuLab P2S
-- Details nicht direkt abfragbar
+### ssh-mcp
+- **Projektverzeichnis:** `~/ssh-mcp/`
+- **Transport:** `streamable-http` auf Port 8002, lauscht auf `/mcp`
+- **SSH-Key:** gemountet im Container (Volume)
+- **Bekannte Hosts:** `pi4` (192.168.178.112), `pi5` (192.168.178.163)
 
 ---
 
 ## Tailscale Funnel
 
-Aktuell aktiv:
 ```
 https://bambuddy.tail5738ee.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:8001   (skill-writer)
+|-- /     proxy http://127.0.0.1:443
+|-- /ssh  proxy http://127.0.0.1:8002
+|-- /sse  proxy http://127.0.0.1:8001/mcp
 ```
 
-**Einschränkung:** Tailscale Funnel unterstützt nur einen Root-Proxy pro Node. ssh-mcp (Port 8002) hat keinen öffentlichen Funnel. Lösungen für später:
-- `tailscale serve` mit Pfad-Routing (statt Funnel)
-- Nginx/Caddy als Reverse Proxy vor beiden Services
+Wichtig: `/sse` zeigt auf `http://127.0.0.1:8001/mcp` (mit Pfad!), weil Claude.ai den Connector-Endpoint `/sse` benutzt, der Container aber streamable-http auf `/mcp` horcht. Der Funnel übersetzt den Pfad.
+
+**Funnel neu aufsetzen nach Reset:**
+```bash
+sudo tailscale serve reset
+tailscale serve --bg --set-path /sse http://127.0.0.1:8001/mcp
+tailscale serve --bg --set-path /ssh http://127.0.0.1:8002
+tailscale funnel --bg 443
+tailscale serve status
+```
+
+**Achtung:** Jede `tailscale funnel`- oder `tailscale serve`-Änderung unterbricht kurz den Tunnel. ssh-mcp fällt dabei ebenfalls aus (läuft über denselben Funnel). Kurz warten und erneut probieren.
 
 ---
 
-## MCP-Endpoints
+## MCP-Endpoints für Claude.ai
 
-| Service | URL für Claude.ai |
+| Service | URL |
 |---|---|
 | skill-writer | `https://bambuddy.tail5738ee.ts.net/sse` |
-| ssh-mcp | noch nicht öffentlich erreichbar |
+| ssh-mcp | `https://bambuddy.tail5738ee.ts.net/ssh/mcp` |
 
 ---
 
-## SSH-MCP Tools (intern verfügbar)
-
-Wenn ssh-mcp in Claude.ai eingetragen ist, stehen folgende Tools bereit:
+## SSH-MCP Tools
 
 - `ssh_exec(command, host="pi4", user="pummelchen")` – beliebiger Shell-Befehl
 - `ssh_docker_ps(host="pi4")` – docker ps
@@ -73,7 +84,36 @@ Wenn ssh-mcp in Claude.ai eingetragen ist, stehen folgende Tools bereit:
 - `ssh_write_file(path, content, host="pi4")` – Datei schreiben (base64)
 - `ssh_read_file(path, host="pi4")` – Datei lesen
 
-Bekannte Hosts: `pi4` (192.168.178.112), `localhost`, `pi5` (192.168.178.1)
+**Wichtig:** `ssh_write_file` schreibt base64-enkodiert. Für längere Dateien besser `ssh_exec` mit Heredoc nutzen:
+```bash
+cat > /pfad/zur/datei << 'EOF'
+...Inhalt...
+EOF
+```
+
+---
+
+## Deploy-Workflow skill-writer-mcp (nach Code-Änderung)
+
+```bash
+# 1. server.py direkt schreiben (via ssh_exec + Heredoc)
+# 2. Neu bauen:
+cd /home/pummelchen/skill-writer-mcp && docker compose up -d --build
+# 3. Logs prüfen:
+docker logs skill-writer-mcp --tail 8
+```
+
+---
+
+## Wichtige Dateipfade Pi4
+
+| Pfad | Inhalt |
+|---|---|
+| `~/skill-writer-mcp/server.py` | skill-writer MCP-Server |
+| `~/skill-writer-mcp/docker-compose.yml` | Compose-Konfiguration |
+| `~/skill-writer-mcp/Dockerfile` | python:3.12-slim, fastmcp + httpx |
+| `~/ssh-mcp/server.py` | ssh-mcp MCP-Server |
+| `~/ssh-mcp/docker-compose.yml` | Compose-Konfiguration |
 
 ---
 
@@ -83,53 +123,16 @@ Definiert in `/config/packages/ssh_pi4.yaml`:
 
 | Service | Funktion |
 |---|---|
-| `shell_command.pi4_docker_logs` | Logs skill-writer-mcp Container (letzten 50 Zeilen) |
-| `shell_command.pi4_docker_restart` | `docker compose restart` in ~/skill-writer-mcp |
-| `shell_command.pi4_update_server` | `docker compose down && up -d --build` |
-| `shell_command.pi4_sync_disk` | `docker cp skill-writer-mcp:/app/server.py ~/skill-writer-mcp/server.py` |
-| `shell_command.pi4_scp_server` | SCP von `/tmp/server_clean.py` → `~/skill-writer-mcp/server.py` |
-| `shell_command.run_fix` | `python3 /tmp/fix_claude.py` – generischer SSH-Executor via Python |
-
-**Deploy-Workflow:**
-1. Datei via `write_file_b64` nach `/tmp/server_clean.py` schreiben
-2. `pi4_scp_server` → kopiert nach Pi4
-3. `pi4_update_server` → rebuild + restart
-
-**Generischer SSH-Befehl:**
-```python
-# fix_claude.py auf Pi5 schreiben, dann run_fix aufrufen
-# SSH-Key: /config/.ssh/pi4_key
-# Pattern:
-import subprocess
-r = subprocess.run(
-    ["ssh", "-i", "/config/.ssh/pi4_key", "-o", "StrictHostKeyChecking=no",
-     "-o", "BatchMode=yes", "pummelchen@192.168.178.112", "BEFEHL"],
-    capture_output=True, text=True, timeout=30
-)
-print(r.stdout + r.stderr)
-```
+| `shell_command.pi4_update_server` | `docker compose up -d --build` in ~/skill-writer-mcp – nur bewusst aufrufen |
+| `shell_command.pi4_sync_disk` | sync |
+| `shell_command.run_fix` | `python3 /tmp/fix_claude.py` – generischer SSH-Executor |
+| `shell_command.write_file_b64` | Datei auf Pi5 schreiben (param: `content_b64`) |
+| `shell_command.read_file_raw` | Datei von Pi5 lesen |
 
 ---
 
-## Wichtige Dateipfade Pi4
+## Bekannte Fallstricke
 
-| Pfad | Inhalt |
-|---|---|
-| `~/skill-writer-mcp/server.py` | Aktueller kombinierter MCP-Server |
-| `~/skill-writer-mcp/docker-compose.yml` | Compose-Konfiguration |
-| `~/skill-writer-mcp/Dockerfile` | python:3.12-slim, fastmcp + httpx |
-
----
-
-## Zweitwohnsitz-HA
-
-- **IP:** 192.168.188.103 (zweiter Raspberry Pi)
-- **Cloudflared:** geplant, noch nicht umgesetzt
-
----
-
-## Bekannte Einschränkungen
-
-- `read_file_raw` / `write_file_b64` lesen/schreiben auf Pi5 (HA-Host), nicht Pi4
-- Tailscale Funnel: nur ein Root-Proxy möglich → ssh-mcp noch nicht extern erreichbar
-- Kein generischer SSH-Command als HA shell_command – Workaround via `run_fix` + `/tmp/fix_claude.py`
+- Tailscale Funnel-Änderungen reißen kurz den Tunnel weg – ssh-mcp verliert dabei die Verbindung. Immer kurz warten.
+- `tailscale funnel --bg --set-path X on` funktioniert nicht (Syntax-Fehler). Stattdessen: erst `serve --set-path`, dann `funnel --bg 443`.
+- `tailscale serve --set-path` schlägt fehl mit "listener already exists", wenn Funnel aktiv ist. Erst `sudo tailscale serve reset`, dann neu aufbauen.
