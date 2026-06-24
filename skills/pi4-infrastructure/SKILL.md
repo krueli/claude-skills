@@ -1,6 +1,6 @@
 # pi4-infrastructure
 
-**Trigger:** Verwende diesen Skill bei allem was den Raspberry Pi 4 (bambuddy/Pi4) betrifft: Docker-Container, skill-writer, ssh-mcp, Bambuddy, Tailscale, Dateitransfer, Remote-Befehle.
+**Trigger:** Verwende diesen Skill bei allem was den Raspberry Pi 4 (bambuddy/Pi4) oder Pi5 (HAOS) per SSH betrifft: Docker-Container, skill-writer, ssh-mcp, Bambuddy, Tailscale, Dateitransfer, Remote-Befehle.
 
 **Stand:** 2026-06-24
 
@@ -16,9 +16,35 @@
 
 ---
 
-## Docker-Container (getrennte Container)
+## SSH-Zugang Pi5 (HAOS)
 
-Seit 2026-06-24 laufen skill-writer und ssh-mcp in **getrennten Containern**.
+Der Pi5 läuft HAOS – kein nativer SSH-Daemon auf Port 22. SSH läuft über das **Advanced SSH & Web Terminal Addon** (`a0d7b954_ssh`).
+
+- **IP:** 192.168.178.163
+- **Port:** 22 (host_network=true, deshalb direkt auf Pi5-IP)
+- **User:** pummelchen
+- **Auth:** Ed25519-Key von Pi4 (`pummelchen@bambuddy`) in `authorized_keys` eingetragen
+- **Hostname im Container:** `a0d7b954-ssh`
+
+**Key (Pi4 → Pi5):**
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBsmdMHxNGDoN/VxCOo9Pq0Zw46WlXE0AGbNVwbwua40 pummelchen@bambuddy
+```
+
+**Zugriff via ssh-mcp:**
+```python
+ssh_exec(command="...", host="pi5", user="pummelchen")
+```
+
+**Häufiger Fehler:** `pi5` zeigte in server.py auf `192.168.178.1` (Fritz!Box-IP) statt `192.168.178.163`. Bereits gefixt (2026-06-24).
+
+**Key beim Addon hinterlegen (falls nötig):**
+Via `ha_manage_addon(slug="a0d7b954_ssh", options={"ssh": {..., "authorized_keys": ["ssh-ed25519 ..."]}})`  
+danach `ha_manage_addon(slug="a0d7b954_ssh", action="restart")`.
+
+---
+
+## Docker-Container (getrennte Container)
 
 | Container | Port | Transport | Endpoint |
 |---|---|---|---|
@@ -38,8 +64,12 @@ Seit 2026-06-24 laufen skill-writer und ssh-mcp in **getrennten Containern**.
 ### ssh-mcp
 - **Projektverzeichnis:** `~/ssh-mcp/`
 - **Transport:** `streamable-http` auf Port 8002, lauscht auf `/mcp`
-- **SSH-Key:** gemountet im Container (Volume)
-- **Bekannte Hosts:** `pi4` (192.168.178.112), `pi5` (192.168.178.163)
+- **SSH-Key:** `/home/pummelchen/.ssh/id_ed25519` gemountet als `/root/.ssh` (read-only Volume)
+- **HOSTS-Map in server.py:**
+  ```python
+  HOSTS = {"pi4": "192.168.178.112", "localhost": "192.168.178.112", "pi5": "192.168.178.163"}
+  ```
+- **SSH-Optionen:** StrictHostKeyChecking=no, BatchMode=yes, ConnectTimeout=10
 
 ---
 
@@ -52,8 +82,6 @@ https://bambuddy.tail5738ee.ts.net (Funnel on)
 |-- /sse  proxy http://127.0.0.1:8001/mcp
 ```
 
-Wichtig: `/sse` zeigt auf `http://127.0.0.1:8001/mcp` (mit Pfad!), weil Claude.ai den Connector-Endpoint `/sse` benutzt, der Container aber streamable-http auf `/mcp` horcht. Der Funnel übersetzt den Pfad.
-
 **Funnel neu aufsetzen nach Reset:**
 ```bash
 sudo tailscale serve reset
@@ -63,7 +91,7 @@ tailscale funnel --bg 443
 tailscale serve status
 ```
 
-**Achtung:** Jede `tailscale funnel`- oder `tailscale serve`-Änderung unterbricht kurz den Tunnel. ssh-mcp fällt dabei ebenfalls aus (läuft über denselben Funnel). Kurz warten und erneut probieren.
+**Achtung:** Jede `tailscale funnel`- oder `tailscale serve`-Änderung unterbricht kurz den Tunnel. Kurz warten und erneut probieren.
 
 ---
 
@@ -84,7 +112,7 @@ tailscale serve status
 - `ssh_write_file(path, content, host="pi4")` – Datei schreiben (base64)
 - `ssh_read_file(path, host="pi4")` – Datei lesen
 
-**Wichtig:** `ssh_write_file` schreibt base64-enkodiert. Für längere Dateien besser `ssh_exec` mit Heredoc nutzen:
+**Wichtig:** `ssh_write_file` schreibt base64-enkodiert. Für längere Dateien besser `ssh_exec` mit Heredoc:
 ```bash
 cat > /pfad/zur/datei << 'EOF'
 ...Inhalt...
@@ -93,15 +121,17 @@ EOF
 
 ---
 
-## Deploy-Workflow skill-writer-mcp (nach Code-Änderung)
+## Deploy-Workflow (nach Code-Änderung in server.py)
 
 ```bash
-# 1. server.py direkt schreiben (via ssh_exec + Heredoc)
-# 2. Neu bauen:
-cd /home/pummelchen/skill-writer-mcp && docker compose up -d --build
-# 3. Logs prüfen:
-docker logs skill-writer-mcp --tail 8
+# 1. server.py via ssh_exec + Python patchen (sed/python3 inline)
+# 2. Neu bauen (im Hintergrund, Timeout-sicher):
+cd ~/ssh-mcp && docker compose up -d --build > /tmp/build.log 2>&1 &
+# 3. Kurz warten, dann Logs prüfen:
+docker ps --filter name=ssh-mcp
 ```
+
+**Timeout-Verhalten:** `docker compose up --build` kann 30–60 s dauern und den SSH-Timeout überschreiten. Immer als Hintergrundprozess starten.
 
 ---
 
@@ -111,28 +141,31 @@ docker logs skill-writer-mcp --tail 8
 |---|---|
 | `~/skill-writer-mcp/server.py` | skill-writer MCP-Server |
 | `~/skill-writer-mcp/docker-compose.yml` | Compose-Konfiguration |
-| `~/skill-writer-mcp/Dockerfile` | python:3.12-slim, fastmcp + httpx |
-| `~/ssh-mcp/server.py` | ssh-mcp MCP-Server |
+| `~/ssh-mcp/server.py` | ssh-mcp MCP-Server (HOSTS-Map hier pflegen) |
 | `~/ssh-mcp/docker-compose.yml` | Compose-Konfiguration |
+| `~/.ssh/id_ed25519` | Private Key (auch im ssh-mcp-Container als /root/.ssh) |
+| `~/.ssh/id_ed25519.pub` | Public Key |
 
 ---
 
-## HA Shell Command Bridge (Zugriff auf Pi4 von HA aus)
+## HA Shell Command Bridge
 
 Definiert in `/config/packages/ssh_pi4.yaml`:
 
 | Service | Funktion |
 |---|---|
-| `shell_command.pi4_update_server` | `docker compose up -d --build` in ~/skill-writer-mcp – nur bewusst aufrufen |
+| `shell_command.pi4_update_server` | `docker compose up -d --build` in ~/skill-writer-mcp |
 | `shell_command.pi4_sync_disk` | sync |
-| `shell_command.run_fix` | `python3 /tmp/fix_claude.py` – generischer SSH-Executor |
-| `shell_command.write_file_b64` | Datei auf Pi5 schreiben (param: `content_b64`) |
+| `shell_command.run_fix` | `python3 /tmp/fix_claude.py` |
+| `shell_command.write_file_b64` | Datei auf Pi5 schreiben |
 | `shell_command.read_file_raw` | Datei von Pi5 lesen |
 
 ---
 
 ## Bekannte Fallstricke
 
-- Tailscale Funnel-Änderungen reißen kurz den Tunnel weg – ssh-mcp verliert dabei die Verbindung. Immer kurz warten.
-- `tailscale funnel --bg --set-path X on` funktioniert nicht (Syntax-Fehler). Stattdessen: erst `serve --set-path`, dann `funnel --bg 443`.
-- `tailscale serve --set-path` schlägt fehl mit "listener already exists", wenn Funnel aktiv ist. Erst `sudo tailscale serve reset`, dann neu aufbauen.
+- **Falsche Pi5-IP:** `pi5` in server.py zeigte auf `192.168.178.1` (Fritz!Box). Korrekt: `192.168.178.163`.
+- **Kein SSH auf Port 22 direkt:** HAOS blockiert Port 22 nativ. Nur via SSH-Addon erreichbar (läuft host_network, also doch Port 22 auf der Pi5-IP).
+- **BatchMode=yes erzwingt Key-Auth:** Passwort-Auth funktioniert im ssh-mcp-Container nicht. Key muss in `authorized_keys` des Addons stehen.
+- **Tailscale Funnel-Änderungen** reißen kurz den Tunnel weg – ssh-mcp verliert Verbindung. Immer kurz warten.
+- **Build-Timeouts:** `docker compose up --build` im Vordergrund läuft in SSH-Timeout. Als `&` im Hintergrund starten.
