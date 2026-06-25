@@ -70,6 +70,27 @@ custom_fields_style:
     <span style='font-weight:bold;color:${color}'>${s ? s.state : 'n/a'}</span></div>` ]]]
 ```
 
+## Hausgeräte-Dashboard (aeg-geraete)
+Separates vollständiges Dashboard mit URL-Pfad `aeg-geraete`, enthält:
+- Waschluder (Waschmaschine via AEG-Integration)
+- Standgebläse (Trockner via AEG-Integration)
+- Herbert (Backofen via AEG-Integration)
+- Luftikusa (Luftreiniger, Switch + State)
+- Spülluder (Geschirrspüler via Miele-Integration)
+
+Jede Sektion hat: Status-Tiles, Restzeit, Programmphase, Steuerbuttons (Start/Pause/Fortsetzen/Stop), Power-Switch.
+
+## Warum der Miele-Geschirrspüler (Spülluder) KEINEN Wattleistungssensor hat
+Die Miele-Integration (G7510) liefert KEINEN Echtzeit-Wattleistungssensor. Es gibt nur:
+- `sensor.spulluder_energieverbrauch` (kWh, nur bekannt während/nach Programm)
+- `sensor.spulluder_energieprognose` (Schätzwert, `unknown` im Idle)
+In der Home-Dashboard Geräte-Verbrauchskarte wird daher der Status (`sensor.spulluder`) statt Watt angezeigt, analog zur Waschluder-Zeile.
+
+## Geräte-Verbrauchskarte (Home-Dashboard)
+Karte: `['views'][0]['sections'][2]['cards'][2]` — custom:button-card "⚡ Geräte Verbrauch"
+Enthält Zeilen für: Klima SZ, Klima Büro, Waschluder (Status), Spülluder (Status), Aquariumfilter, Skimmer, CO2, Markise, Bambula, Gesamtbedarf.
+Geräte ohne Watt-Sensor (AEG, Miele) zeigen State statt Watt, mit Farbwechsel grün/grau je nach aktiv.
+
 ## Wichtige Entity-IDs (Michael, Leipzig)
 - PV Solarleistung: `sensor.solarbank_3_e2700_pro_solarleistung`
 - PV Hausabgabe: `sensor.solarbank_3_e2700_pro_ac_hausabgabe`
@@ -86,6 +107,23 @@ custom_fields_style:
 - Klima SZ: `sensor.smart_switch_24110884111321510804c4e7ae103138_power`
 - Klima Büro: `sensor.smart_switch_24110893663466510804c4e7ae10316d_power`
 - Waschluder Status: `sensor.waschluder_state`
+- Waschluder Restzeit: `sensor.waschluder_restzeit_hh_mm`
+- Waschluder Programm: `sensor.waschluder_program`
+- Herbert (Backofen) Status: `sensor.herbert_state`
+- Herbert Steuerbuttons: `button.herbert_start/pause/resume/stop_reset`
+- Herbert Power: `switch.herbert_power`
+- Standgebläse (Trockner) Status: `sensor.standgeblaese_state`
+- Standgebläse Restzeit: `sensor.standgeblase_restzeit_hh_mm`
+- Standgebläse Steuerbuttons: `button.standgeblaese_start/pause/resume/stop_reset`
+- Spülluder (Geschirrspüler) Status: `sensor.spulluder`
+- Spülluder Restzeit: `sensor.spulluder_restzeit_hh_mm`
+- Spülluder Programm: `sensor.spulluder_programm`
+- Spülluder Programmphase: `sensor.spulluder_programmphase`
+- Spülluder PowerDisk: `sensor.spulluder_powerdisk_fullstand`
+- Spülluder Klarspüler: `sensor.spulluder_klarspuler_fullstand`
+- Spülluder Power: `switch.spulluder_stromversorgung`
+- Luftikusa Status: `sensor.luftikusa_state`
+- Luftikusa Power: `switch.luftikusa_power`
 - Aquariumfilter: `sensor.smart_switch_24110880220563510804c4e7ae102cd4_power`
 - Außen Temp/Feuchte: `sensor.gw2000a_wifi637b_aussen_temperatur` / `_aussen_luftfeuchte`
 - Wohnzimmer: `sensor.thermometer_wohnzimmer_temperature` / `_humidity`
