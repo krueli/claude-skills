@@ -62,26 +62,24 @@ liefert python_path je Karte; Karte mit `name: "⚡ Geräte Verbrauch"` ist
 die richtige. Bearbeitung über `ha_config_set_dashboard(python_transform=...)`
 mit `.replace()` auf den content-String (gezielter Insert, kein Full-Replace).
 
-## Karten-Titel-Mismatch in "Netz & Smart Home" (behoben)
-In dieser Sektion lagen ursprünglich DREI button-cards mit teils vertauschten
-Inhalten – Titel und JS-Template-Content passten nicht zusammen:
-- "⚡ Geräte Verbrauch" (Index 3): korrekt, Geräte-Verbrauchsliste.
-- "🔋 Solarbank Übersicht" (Index 2): zeigte fälschlich dieselbe
-  Geräte-Verbrauchsliste statt Solar-/Akkudaten.
-- "🌐 FritzBox 6690" (Index 1): zeigte fälschlich Solar-/Akkudaten
-  (SoC, Akku-Energie, Solarleistung, Hausabgabe, Betriebszustand)
-  statt Netzwerk-Infos, plus tap_action auf Router-IP.
+## Karten-Aufräumung in "Netz & Smart Home" (Stand dieser Session)
+Ursprünglich lagen dort DREI button-cards mit teils vertauschten Inhalten
+(Titel passte nicht zum gerenderten Content – vermutlich ein alter
+Copy-Paste-Fehler, kein reines Duplikat):
+- "⚡ Geräte Verbrauch": korrekt, Geräte-Verbrauchsliste.
+- "🔋 Solarbank Übersicht": zeigte fälschlich dieselbe Verbrauchsliste.
+- "🌐 FritzBox 6690": zeigte fälschlich Solar-/Akkudaten (SoC, Akku-Energie,
+  Solarleistung, Hausabgabe, Betriebszustand), tap_action auf Router-IP.
 
-Fix (Stand dieser Session): Inhalt der FritzBox-Karte in die
-Solarbank-Übersicht-Karte kopiert (`solarbank['custom_fields']['content']
-= fritzbox['custom_fields']['content']`), dann die FritzBox-Karte komplett
-gelöscht (`del config['views'][0]['sections'][3]['cards'][1]`), da ihr
-einziger Mehrwert der Tap-Link zur Router-IP war und kein eigener Inhalt
-fehlte. Sektion "Netz & Smart Home" hat jetzt 4 Karten: heading,
-Solarbank Übersicht (echte Daten), Geräte Verbrauch, Müllabfuhr.
+Endgültiger Zustand nach Bereinigung: Beide "Solarbank Übersicht" und
+"FritzBox 6690" wurden komplett gelöscht. Begründung des Nutzers: Solar-/
+Akkudaten stehen bereits vollständig in der Karte "☀️ Photovoltaik"
+(Sektion "Solar & Energie", PV Erzeugung/Hausverbrauch/Netzeinspeisung/
+Netzbezug/Akku SoC/Ertrag gesamt) – eine zweite Solar-Karte war redundant,
+nicht nur falsch beschriftet. Sektion "Netz & Smart Home" besteht jetzt
+nur noch aus: heading, Geräte Verbrauch, Müllabfuhr.
 
-Lehre: Bei mehreren button-cards mit identischem JS-Template-Skelett (gleiche
-Helper-Funktionen fmt/st/row/wattRow) immer prüfen, ob Titel und
-tatsächlich gerenderte Werte zusammenpassen, bevor man eine Karte als
-"Duplikat" abtut – oft ist es ein Copy-Paste-Vertauscher zwischen zwei
-verschiedenen Karten, kein reines Duplikat.
+Lehre für künftige Dashboard-Aufräumarbeiten: Bei einer vermeintlichen
+"Reparatur" einer falsch beschrifteten Karte immer auch prüfen, ob es
+bereits eine andere, thematisch passende Karte mit denselben Daten gibt
+(hier: Photovoltaik-Karte) – dann eher löschen als zweimal pflegen.
