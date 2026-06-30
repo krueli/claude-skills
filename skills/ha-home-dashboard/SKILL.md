@@ -90,10 +90,11 @@ config['views'][0]['sections'][3]['cards'][1]['custom_fields']['content'] = cont
 ```
 Für Reihenfolge-Tausch zweier `<div>...</div>`-Blöcke: beide Blöcke als Variablen definieren (exakter String inkl. aller Anführungszeichen) und `m.replace(a + b, b + a)` aufrufen — robuster als Index-basiertes Slicing im String.
 
-## BEKANNTER BUG: switch.75pml9009_12_bildschirmstatus (Philips TV, JointSpace-API)
-Dieser Switch meldet NIEMALS "on", egal ob der Fernseher läuft oder nicht (geprüft über 48h Historie: nur "off"/"unavailable"). Vermutlich unterstützt die Firmware den "screenstate"-Endpoint der JointSpace-API nicht zuverlässig. NICHT für TV-Status im Dashboard verwenden.
-Stattdessen: `media_player.75pml9009_12` (state "on"/"off") — trackt zuverlässig, hat aber `assumed_state: true` (keine aktive Abfrage, sondern Ableitung aus gesendeten Kommandos/App-Events). Bei Bedarf gegenchecken, falls einzelne Edge Cases (z.B. TV per Fernbedienung ohne HA-Befehl ausgeschaltet) nicht sauber erkannt werden.
-Falls der Bug auch in anderen Automationen/Dashboards mit diesem Switch auftaucht: dort ebenfalls auf media_player umstellen.
+## BEKANNTER BUG: switch.75pml9009_12_bildschirmstatus (Philips TV, JointSpace-API) — NICHT REPARIERBAR
+Dieser Switch meldet NIEMALS "on", egal ob der Fernseher läuft oder nicht (geprüft über 48h Historie: nur "off"/"unavailable"). Config-Entry `01KM62F22SKA5CNZPWCT55XY6J` (Platform `philips_js`).
+**Reload/Reconfigure der Integration wurde am 30.06.2026 getestet (disable → enable) — hat NICHTS gebracht.** Sofort nach dem Reload meldete der Switch wieder "off", während `media_player.75pml9009_12` zeitgleich korrekt "on" zeigte. Das ist also kein Auth-/Verbindungsproblem, sondern ein struktureller Bug: die Firmware beantwortet den "screenstate"-Endpoint der JointSpace-API nicht zuverlässig. Lässt sich von HA-Seite nicht fixen — würde ein Firmware-Update am Fernseher oder einen Fix in der `philips_js`-Integration selbst brauchen, beides außerhalb von HA-Tooling. NICHT erneut versuchen zu reparieren, nur noch konsequent meiden.
+Verwende stattdessen: `media_player.75pml9009_12` (state "on"/"off") — trackt zuverlässig, hat aber `assumed_state: true` (keine aktive Abfrage, sondern Ableitung aus gesendeten Kommandos/App-Events).
+Falls der Bug auch in anderen Automationen/Dashboards mit diesem Switch auftaucht: dort ebenfalls auf media_player umstellen. Alle 12 Dashboards wurden am 30.06.2026 durchsucht — nur home-overview hatte ihn referenziert, ist bereits gefixt.
 
 ## Hausgeräte-Dashboard (aeg-geraete)
 Separates vollständiges Dashboard mit URL-Pfad `aeg-geraete`, enthält:
@@ -150,7 +151,7 @@ Geräte ohne Watt-Sensor (AEG, Miele) zeigen State statt Watt, mit Farbwechsel g
 - Luftikusa Status: `sensor.luftikusa_state`
 - Luftikusa Power: `switch.luftikusa_power`
 - Aquariumfilter: `sensor.smart_switch_24110880220563510804c4e7ae102cd4_power`
-- Fernseher (Wohnzimmer, Philips 75PML9009/12): `media_player.75pml9009_12` (zuverlässig) — NICHT `switch.75pml9009_12_bildschirmstatus` (kaputt, meldet nie "on")
+- Fernseher (Wohnzimmer, Philips 75PML9009/12): `media_player.75pml9009_12` (zuverlässig) — NICHT `switch.75pml9009_12_bildschirmstatus` (kaputt, meldet nie "on", Reload bringt nichts)
 - Fernseher Alexa-Schatten-Entity (unabhängig, seit Tagen unavailable, ungenutzt): `media_player.wohnzimmer_fernseher`
 - Außen Temp/Feuchte: `sensor.gw2000a_wifi637b_aussen_temperatur` / `_aussen_luftfeuchte`
 - Wohnzimmer: `sensor.thermometer_wohnzimmer_temperature` / `_humidity`
