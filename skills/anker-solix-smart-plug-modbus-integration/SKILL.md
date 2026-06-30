@@ -62,7 +62,26 @@ liefert python_path je Karte; Karte mit `name: "⚡ Geräte Verbrauch"` ist
 die richtige. Bearbeitung über `ha_config_set_dashboard(python_transform=...)`
 mit `.replace()` auf den content-String (gezielter Insert, kein Full-Replace).
 
-Achtung: Es existiert eine fast identische Duplikat-Karte "🔋 Solarbank
-Übersicht" mit demselben JS-Template (an einer Stelle bereits mit
-zusätzlichem Wasserbett-Eintrag) – nicht verwechseln, nur "Geräte Verbrauch"
-ist die kanonische Verbraucher-Liste.
+## Karten-Titel-Mismatch in "Netz & Smart Home" (behoben)
+In dieser Sektion lagen ursprünglich DREI button-cards mit teils vertauschten
+Inhalten – Titel und JS-Template-Content passten nicht zusammen:
+- "⚡ Geräte Verbrauch" (Index 3): korrekt, Geräte-Verbrauchsliste.
+- "🔋 Solarbank Übersicht" (Index 2): zeigte fälschlich dieselbe
+  Geräte-Verbrauchsliste statt Solar-/Akkudaten.
+- "🌐 FritzBox 6690" (Index 1): zeigte fälschlich Solar-/Akkudaten
+  (SoC, Akku-Energie, Solarleistung, Hausabgabe, Betriebszustand)
+  statt Netzwerk-Infos, plus tap_action auf Router-IP.
+
+Fix (Stand dieser Session): Inhalt der FritzBox-Karte in die
+Solarbank-Übersicht-Karte kopiert (`solarbank['custom_fields']['content']
+= fritzbox['custom_fields']['content']`), dann die FritzBox-Karte komplett
+gelöscht (`del config['views'][0]['sections'][3]['cards'][1]`), da ihr
+einziger Mehrwert der Tap-Link zur Router-IP war und kein eigener Inhalt
+fehlte. Sektion "Netz & Smart Home" hat jetzt 4 Karten: heading,
+Solarbank Übersicht (echte Daten), Geräte Verbrauch, Müllabfuhr.
+
+Lehre: Bei mehreren button-cards mit identischem JS-Template-Skelett (gleiche
+Helper-Funktionen fmt/st/row/wattRow) immer prüfen, ob Titel und
+tatsächlich gerenderte Werte zusammenpassen, bevor man eine Karte als
+"Duplikat" abtut – oft ist es ein Copy-Paste-Vertauscher zwischen zwei
+verschiedenen Karten, kein reines Duplikat.
