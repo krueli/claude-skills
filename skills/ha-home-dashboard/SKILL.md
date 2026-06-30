@@ -17,6 +17,16 @@
 - Gelbe Tonne: alle 14 Tage dienstags (01.07., 15.07., 29.07. ...)
 - Blaue Tonne: alle 14 Tage (29.06., 13.07., 27.07. ...)
 - Graue Tonne: alle 14 Tage (30.06., 14.07., 28.07. ...)
+- Anzeigereihenfolge in der Müllkarte (Stand 30.06.2026, Wunsch von Michael): Blaue, Graue, Gelbe (Graue in der Mitte, Gelbe am Ende)
+
+## WICHTIG: Sections-Index hat sich verschoben (Stand 30.06.2026)
+Das Dashboard hat inzwischen 4 Sections in dieser Reihenfolge:
+0. Solar & Energie
+1. Klima & Temperaturen
+2. Lampen & Steckdosen (NEU dazugekommen — verschiebt alles danach um 1 Index)
+3. Netz & Smart Home → cards[1] = "⚡ Geräte Verbrauch", cards[2] = "🗑️ Müllabfuhr"
+
+Vor jeder python_transform-Bearbeitung den Index per `ha_config_get_dashboard(card_type="custom:button-card", include_config=True, url_path="home-overview")` neu verifizieren statt sich auf alte Pfadangaben zu verlassen — die Section-Reihenfolge ändert sich, wenn neue Sections eingefügt werden.
 
 ## KRITISCH: write_file_b64 Shell-Command
 Parameter heißt `content_b64`, NICHT `b64`:
@@ -47,13 +57,13 @@ styles:
     - color: "#FFD700"
     - padding-bottom: 8px
 custom_fields:
-  zeile1: >
+  content: >
     [[[ return `<div style='display:flex;justify-content:space-between;padding:2px 0'>
     <span style='color:#aaa'>Label</span>
     <span style='font-weight:bold;color:#fff'>${states['sensor.entity'].state} W</span>
     </div>` ]]]
 custom_fields_style:
-  zeile1:
+  content:
     - display: block
     - width: 100%
     - color: "#fff"
@@ -69,6 +79,21 @@ custom_fields_style:
     <span style='color:#4DA6FF'>Blaue Tonne</span>
     <span style='font-weight:bold;color:${color}'>${s ? s.state : 'n/a'}</span></div>` ]]]
 ```
+
+## Editieren per python_transform — bewährtes Muster für button-card-Inhalte
+Der gesamte Kartentext liegt als ein langer JS-Template-String unter `custom_fields.content`.
+Statt den ganzen String neu zu schreiben: gezielte `.replace()`-Aufrufe auf eindeutigen Teilstrings nutzen, dann zurückschreiben. Beispiel (TV-Entity-Fix):
+```python
+content = config['views'][0]['sections'][3]['cards'][1]['custom_fields']['content']
+content = content.replace("st('switch.alt')", "st('media_player.neu')")
+config['views'][0]['sections'][3]['cards'][1]['custom_fields']['content'] = content
+```
+Für Reihenfolge-Tausch zweier `<div>...</div>`-Blöcke: beide Blöcke als Variablen definieren (exakter String inkl. aller Anführungszeichen) und `m.replace(a + b, b + a)` aufrufen — robuster als Index-basiertes Slicing im String.
+
+## BEKANNTER BUG: switch.75pml9009_12_bildschirmstatus (Philips TV, JointSpace-API)
+Dieser Switch meldet NIEMALS "on", egal ob der Fernseher läuft oder nicht (geprüft über 48h Historie: nur "off"/"unavailable"). Vermutlich unterstützt die Firmware den "screenstate"-Endpoint der JointSpace-API nicht zuverlässig. NICHT für TV-Status im Dashboard verwenden.
+Stattdessen: `media_player.75pml9009_12` (state "on"/"off") — trackt zuverlässig, hat aber `assumed_state: true` (keine aktive Abfrage, sondern Ableitung aus gesendeten Kommandos/App-Events). Bei Bedarf gegenchecken, falls einzelne Edge Cases (z.B. TV per Fernbedienung ohne HA-Befehl ausgeschaltet) nicht sauber erkannt werden.
+Falls der Bug auch in anderen Automationen/Dashboards mit diesem Switch auftaucht: dort ebenfalls auf media_player umstellen.
 
 ## Hausgeräte-Dashboard (aeg-geraete)
 Separates vollständiges Dashboard mit URL-Pfad `aeg-geraete`, enthält:
@@ -87,8 +112,8 @@ Die Miele-Integration (G7510) liefert KEINEN Echtzeit-Wattleistungssensor. Es gi
 In der Home-Dashboard Geräte-Verbrauchskarte wird daher der Status (`sensor.spulluder`) statt Watt angezeigt, analog zur Waschluder-Zeile.
 
 ## Geräte-Verbrauchskarte (Home-Dashboard)
-Karte: `['views'][0]['sections'][2]['cards'][2]` — custom:button-card "⚡ Geräte Verbrauch"
-Enthält Zeilen für: Klima SZ, Klima Büro, Waschluder (Status), Spülluder (Status), Aquariumfilter, Skimmer, CO2, Markise, Bambula, Gesamtbedarf.
+Karte: `['views'][0]['sections'][3]['cards'][1]` — custom:button-card "⚡ Geräte Verbrauch" (Stand 30.06.2026)
+Enthält Zeilen für: Klima SZ, Klima Büro, Waschluder (Status), Trockner (Status), Backofen (Status), Spülluder (Status), Fernseher (Status via media_player.75pml9009_12, NICHT switch.75pml9009_12_bildschirmstatus), Aquariumfilter, Skimmer, CO2, Markise, Bambula, Ladegeräte Garage, Gefrierschrank Keller, Gesamtbedarf.
 Geräte ohne Watt-Sensor (AEG, Miele) zeigen State statt Watt, mit Farbwechsel grün/grau je nach aktiv.
 
 ## Wichtige Entity-IDs (Michael, Leipzig)
@@ -125,6 +150,8 @@ Geräte ohne Watt-Sensor (AEG, Miele) zeigen State statt Watt, mit Farbwechsel g
 - Luftikusa Status: `sensor.luftikusa_state`
 - Luftikusa Power: `switch.luftikusa_power`
 - Aquariumfilter: `sensor.smart_switch_24110880220563510804c4e7ae102cd4_power`
+- Fernseher (Wohnzimmer, Philips 75PML9009/12): `media_player.75pml9009_12` (zuverlässig) — NICHT `switch.75pml9009_12_bildschirmstatus` (kaputt, meldet nie "on")
+- Fernseher Alexa-Schatten-Entity (unabhängig, seit Tagen unavailable, ungenutzt): `media_player.wohnzimmer_fernseher`
 - Außen Temp/Feuchte: `sensor.gw2000a_wifi637b_aussen_temperatur` / `_aussen_luftfeuchte`
 - Wohnzimmer: `sensor.thermometer_wohnzimmer_temperature` / `_humidity`
 - Schlafzimmer: `sensor.thermometer_schlafzimmer_temperature`
