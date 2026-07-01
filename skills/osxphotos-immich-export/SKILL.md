@@ -75,18 +75,27 @@ Album-Aufschlüsselung (`jq -r '.[].albums[]' missing_shared.json | sort | uniq 
 
 Gleichmäßig verteilt, kein einzelner Ausreißer — bestätigt: album-weise Batch-Verarbeitung ist der richtige Ansatz, kein Sonderfall für ein Riesenalbum nötig.
 
+### Gemessene Testlauf-Rate
+Testlauf mit Abschlussball_12.2015 (31 Fotos): **3 Minuten** → ~5,8s/Foto. Hochgerechnet auf die restlichen 2.587 Fotos: **~4,2 Stunden** reine Downloadzeit.
+
+**Wichtiger Vorbehalt:** Diese Rate stammt aus einem kleinen 31-Foto-Batch. Apples Download-Rate-Limit greift oft erst bei längeren Serien-Downloads (Drosselung nach X Requests in kurzer Zeit) — ein kleiner Test triggert das u.U. noch nicht. Der erste große Lauf (Westcoast-Rundreise, 326 Fotos) ist der eigentliche Belastungstest: bleibt die Rate dort bei ~5,8s/Foto, ist die 4,2h-Hochrechnung solide. Wird er spürbar langsamer, gilt die Zahl nur als unterer Richtwert.
+
+Geschätzte Zeit pro Album bei 5,8s/Foto (obiger Vorbehalt gilt):
+
+| Album | Fotos | ~Zeit |
+|---|---|---|
+| Westcoast-Rundreise | 326 | ~32 Min |
+| AIDA Spanien/Portugal | 251 | ~24 Min |
+| Südostasien | 205 | ~20 Min |
+| USA Eastcoast | 204 | ~20 Min |
+| Rom / Mallorca 2018 / Jugendweihe | je 192 | je ~19 Min |
+| AIDA Ostseetour | 174 | ~17 Min |
+| Prag 2014 | 128 | ~12 Min |
+| Norwegen mit Aida | 109 | ~11 Min |
+
 ### Vorgehen
 1. **Erst lokale (nicht-geteilte) Alben exportieren** — läuft schnell, kein Cloud-Download nötig.
-2. **Testlauf mit kleinstem Album zuerst** (Abschlussball_12.2015, 31 Fotos), um reale Download-Zeit pro Foto zu messen:
-   ```bash
-   time osxphotos export ~/immich-missing/Abschlussball_12.2015 \
-     --album "Abschlussball_12.2015" \
-     --filename "{original_name}" \
-     --download-missing \
-     --exiftool \
-     --verbose
-   ```
-   Ergebnis hochrechnen auf die Gesamtmenge (2.618 Fotos), um realistisches Zeitbudget für den Rest zu bekommen.
+2. **Nächster Testlauf: Westcoast-Rundreise (326 Fotos)** als Belastungstest, um zu prüfen ob die 5,8s/Foto-Rate bei größerem Batch hält oder ob Apples Rate-Limit greift.
 3. **Danach absteigend nach Albumgröße abarbeiten** (Westcoast-Rundreise → AIDA Spanien/Portugal → Südostasien → ...), damit die großen Brocken nicht bis zuletzt liegen bleiben.
 4. **Jedes Album einzeln exportieren, nicht in einem Gesamtlauf.** Bricht ein Album-Download ab, betrifft das nicht die bereits fertigen Alben.
 5. **Bei jedem Wiederanlauf `--only-new`** verwenden, damit bereits heruntergeladene Dateien nicht erneut angefasst werden.
@@ -99,4 +108,4 @@ exiftool -DateTimeOriginal -GPSLatitude -GPSLongitude ~/immich-test/<Album>/<Dat
 Prüfen ob Datum und GPS korrekt gesetzt sind, bevor der Gesamtimport läuft.
 
 ## Nächster Schritt (Stand dieser Session)
-Test-Export lief erfolgreich nach Fix von exiftool-Installation. Umfang und Album-Verteilung der Missing-Shared-Fotos sind bekannt. Nächster Schritt: Testlauf mit Abschlussball_12.2015 zur Zeitschätzung, dann Download-Läufe album-weise absteigend nach Größe starten, parallel lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
+Test-Export lief erfolgreich, Zeitrate für kleines Album gemessen (5,8s/Foto → ~4,2h für Rest, mit Vorbehalt siehe oben). Nächster Schritt: Westcoast-Rundreise (326 Fotos) als Belastungstest laufen lassen, prüfen ob Rate hält, dann restliche Alben absteigend nach Größe abarbeiten, parallel lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
