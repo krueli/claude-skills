@@ -1,7 +1,7 @@
 # osxphotos Export für Immich-Migration
 
 ## Kontext
-Michael migriert ~16.000 Fotos von Apple Photos (iCloud) auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest, nicht aus separaten Sidecars.
+Michael migriert ~16.000 Fotos von Apple Photos auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Fotos-Bibliothek liegt lokal. Nur in einigen **geteilten Alben** fehlen Bilder, die aus iCloud nachgeladen werden müssen. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest, nicht aus separaten Sidecars.
 
 ## Setup
 - osxphotos läuft in eigenem venv: `osxphotos-env`
@@ -34,13 +34,22 @@ Wichtig für Performance-Einschätzung: Die Laufzeit von `--exiftool` hängt am 
 
 Falls wirklich nur einzelne Felder gewünscht sind: `--sidecar XMP` exportieren und per eigenem exiftool-Aufruf (`-DateTimeOriginal -GPSLatitude -GPSLongitude`) gezielt aus dem Sidecar in die Zieldatei schreiben. Für den Normalfall (Immich-Import) unnötig — zusätzliche Felder wie Keywords/Description stören dort nicht.
 
-## Skalierung bei 16.000 Fotos
-Bei dieser Größenordnung reicht "einmal exportieren und gut" nicht mehr. Relevante Punkte:
+## Skalierung bei 16.000 Fotos (lokale Bibliothek)
+Da die Bibliothek lokal liegt, ist `--download-missing` für den Großteil der Fotos irrelevant. Der eigentliche Flaschenhals ist der exiftool-Durchlauf, nicht das Nachladen aus der Cloud:
 
-- **Laufzeit exiftool:** ~0,3–0,5s Subprocess-Overhead pro Datei → allein 1,5–2,5h nur für den exiftool-Durchlauf, ohne Kopiervorgang.
-- **`--download-missing` ist der eigentliche Flaschenhals, nicht exiftool.** Fotos, die iCloud-Speicheroptimiert sind und nicht mehr lokal gecached liegen, werden erst von Apple nachgeladen — abhängig von Apples Rate-Limits, nicht von der eigenen Bandbreite. Kann von "läuft nebenbei durch" bis "dauert über Nacht oder länger" reichen. Vorher prüfen: `osxphotos query --missing` zeigt die Zahl der nicht-lokalen Originale.
+- **Laufzeit exiftool:** ~0,3–0,5s Subprocess-Overhead pro Datei → 1,5–2,5h nur für den exiftool-Durchlauf bei 16.000 Dateien, ohne Kopiervorgang.
 - **Speicherplatz:** bei realistisch 3–8 MB/Foto (mehr bei RAW/Live Photos) sind 16.000 Fotos 50–130 GB. Vorher `df -h` auf dem Zielvolume checken.
-- **Batching statt Gesamtexport in einem Rutsch.** Bei 16.000 Dateien lieber pro Jahr oder pro großem Album exportieren statt alles in einem Befehl. Bricht der Export z.B. bei Datei 12.000 wegen eines defekten/fehlenden Originals ab, will man nicht bei null anfangen. Bei Wiederanlauf `--only-new` nutzen, damit bereits exportierte Dateien übersprungen werden.
+- **Batching statt Gesamtexport in einem Rutsch.** Lieber pro Jahr oder pro großem Album exportieren statt alles in einem Befehl. Bricht der Export ab, will man nicht bei null anfangen. Bei Wiederanlauf `--only-new` nutzen, damit bereits exportierte Dateien übersprungen werden.
+
+### Geteilte Alben mit fehlenden Bildern separat behandeln
+Nur einige geteilte Alben haben Originale, die nicht lokal vorliegen. Diese getrennt vom Rest exportieren, damit der Cloud-Download nicht den Export der lokal bereits vorhandenen Masse blockiert.
+
+1. Vorher tatsächliche Zahl der fehlenden Bilder in geteilten Alben prüfen:
+   ```bash
+   osxphotos query --shared --missing
+   ```
+2. Erst die lokalen (nicht-geteilten) Alben exportieren — läuft schnell, kein Cloud-Download nötig.
+3. Danach die geteilten Alben mit fehlenden Originalen separat mit `--download-missing` exportieren — hier ist Apples Rate-Limit der Flaschenhals, kann je nach Menge deutlich länger dauern.
 
 ## Qualitätscheck vor Gesamt-Import
 Vor dem vollen Batch immer erst an 2-3 Testalben validieren:
@@ -50,4 +59,4 @@ exiftool -DateTimeOriginal -GPSLatitude -GPSLongitude ~/immich-test/<Album>/<Dat
 Prüfen ob Datum und GPS korrekt gesetzt sind, bevor der Gesamtimport läuft.
 
 ## Nächster Schritt (Stand dieser Session)
-Test-Export lief erfolgreich nach Fix von exiftool-Installation. Nächster Schritt: `osxphotos query --missing` laufen lassen um Cloud-only-Anteil zu kennen, Testalben validieren, dann Batching-Strategie für 16.000 Fotos festlegen, dann Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
+Test-Export lief erfolgreich nach Fix von exiftool-Installation. Nächster Schritt: `osxphotos query --shared --missing` laufen lassen um Umfang der geteilten-Alben-Downloads zu kennen, Testalben validieren, dann zweigeteilte Export-Strategie (lokal / geteilt+missing) fahren, dann Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
