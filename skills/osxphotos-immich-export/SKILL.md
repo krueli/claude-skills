@@ -1,12 +1,13 @@
 # osxphotos Export für Immich-Migration
 
 ## Kontext
-Michael migriert ~16.000 Fotos von Apple Photos auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Fotos-Bibliothek liegt lokal. In geteilten Alben fehlen **2.618 Originale** (Stand dieser Session, ermittelt via `osxphotos query --shared --missing`), verteilt über sehr viele Reisealben (u.a. USA Eastcoast, AIDA Spanien/Portugal, Südostasien, Norwegen mit Aida, Westcoast-Rundreise, Rovaniemi 2024, Mallorca 2018) und Zeiträume von 2008 bis heute. Das ist kein Nebenschritt, sondern ein eigener Migrationsblock mit relevantem Zeitbudget. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest, nicht aus separaten Sidecars.
+Michael migriert ~16.000 Fotos von Apple Photos auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Fotos-Bibliothek liegt lokal. In geteilten Alben fehlen **2.618 Originale** (Stand dieser Session, ermittelt via `osxphotos query --shared --missing`), verteilt über sehr viele Reisealben von 2008 bis heute. Das ist kein Nebenschritt, sondern ein eigener Migrationsblock mit relevantem Zeitbudget. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest, nicht aus separaten Sidecars.
 
 ## Setup
 - osxphotos läuft in eigenem venv: `osxphotos-env`
 - Version: 0.76.1 (Stand Juli 2026)
 - exiftool wird zwingend benötigt: `brew install exiftool`, danach mit `which exiftool` prüfen
+- `jq` für JSON-Auswertung: `brew install jq`
 - Terminal: bracketed paste mode kann bei eingefügten Multi-Line-Befehlen `[200~ ... ~]`-Artefakte erzeugen → `unset zle_bracketed_paste` in `~/.zshrc`, falls Copy-Paste-Befehle mit "bad pattern"-Fehlern abbrechen
 
 ## Funktionierender Export-Befehl
@@ -45,20 +46,49 @@ Da die Bibliothek lokal liegt, ist `--download-missing` für den Großteil der F
 
 ## Geteilte Alben mit 2.618 fehlenden Bildern — eigener Migrationsblock
 
-Ermittelte Zahl: `osxphotos query --shared --missing | wc -l` → 2619 (minus Kopfzeile = 2618 fehlende Originale). Das ist eine Größenordnung, bei der Apples Download-Rate-Limit realistisch mehrere Stunden bis über Nacht in Anspruch nimmt, verteilt über einen Nachladevorgang. Album-für-Album ist hier Pflicht, nicht nur "besser":
+Ermittelte Zahl: `osxphotos query --shared --missing | wc -l` → 2619 (minus Kopfzeile = 2618 fehlende Originale).
 
-1. **Umfang je Album ermitteln, bevor der Download startet:**
+Album-Aufschlüsselung (`jq -r '.[].albums[]' missing_shared.json | sort | uniq -c | sort -rn`), Top 20:
+
+| Anzahl fehlend | Album |
+|---|---|
+| 326 | Westcoast-Rundreise |
+| 251 | AIDA Spanien/Portugal |
+| 205 | Südostasien |
+| 204 | USA Eastcoast |
+| 192 | Rom |
+| 192 | Mallorca 2018 |
+| 192 | Jugendweihe |
+| 174 | AIDA Ostseetour |
+| 128 | Prag 2014 |
+| 109 | Norwegen mit Aida |
+| 91 | Frankreich 2015 |
+| 91 | Exeter |
+| 80 | Weber Grillakademie 2016 |
+| 65 | Rovaniemi 2024 |
+| 54 | Heide Park |
+| 52 | Klassenfahrt |
+| 45 | F Scan |
+| 32 | Ostsee-Warnemünde |
+| 32 | AIDA Kanarische Inseln |
+| 31 | Abschlussball_12.2015 |
+
+Gleichmäßig verteilt, kein einzelner Ausreißer — bestätigt: album-weise Batch-Verarbeitung ist der richtige Ansatz, kein Sonderfall für ein Riesenalbum nötig.
+
+### Vorgehen
+1. **Erst lokale (nicht-geteilte) Alben exportieren** — läuft schnell, kein Cloud-Download nötig.
+2. **Testlauf mit kleinstem Album zuerst** (Abschlussball_12.2015, 31 Fotos), um reale Download-Zeit pro Foto zu messen:
    ```bash
-   osxphotos query --shared --missing --json > missing_shared.json
+   time osxphotos export ~/immich-missing/Abschlussball_12.2015 \
+     --album "Abschlussball_12.2015" \
+     --filename "{original_name}" \
+     --download-missing \
+     --exiftool \
+     --verbose
    ```
-   Aus dem `albums`-Feld pro Foto die betroffenen Albumnamen extrahieren und nach Anzahl fehlender Fotos sortieren (z.B. mit `jq`), um zu wissen wo die dicksten Brocken liegen.
-
-2. **Erst die lokalen (nicht-geteilten) Alben exportieren** — läuft schnell, kein Cloud-Download nötig.
-
-3. **Geteilte Alben mit Missing-Originalen einzeln, nicht alle in einem Lauf.** Bei 2.618 betroffenen Dateien über viele Alben verteilt ist die Wahrscheinlichkeit hoch, dass ein Gesamtlauf irgendwo abbricht (Netzwerk, Session-Timeout, defekte Assets) — dann ohne Album-Trennung von vorn anfangen zu müssen kostet mehr als die Vorab-Aufteilung.
-
-4. **Reihenfolge:** Erst ein kleines Album als Test fahren, um die reale Download-Geschwindigkeit pro Foto einzuschätzen. Danach die großen Alben (laut Fotoliste u.a. USA Eastcoast, AIDA Spanien/Portugal, Südostasien als Kandidaten für viele Missing-Einträge) einzeln mit `--download-missing` laufen lassen.
-
+   Ergebnis hochrechnen auf die Gesamtmenge (2.618 Fotos), um realistisches Zeitbudget für den Rest zu bekommen.
+3. **Danach absteigend nach Albumgröße abarbeiten** (Westcoast-Rundreise → AIDA Spanien/Portugal → Südostasien → ...), damit die großen Brocken nicht bis zuletzt liegen bleiben.
+4. **Jedes Album einzeln exportieren, nicht in einem Gesamtlauf.** Bricht ein Album-Download ab, betrifft das nicht die bereits fertigen Alben.
 5. **Bei jedem Wiederanlauf `--only-new`** verwenden, damit bereits heruntergeladene Dateien nicht erneut angefasst werden.
 
 ## Qualitätscheck vor Gesamt-Import
@@ -69,4 +99,4 @@ exiftool -DateTimeOriginal -GPSLatitude -GPSLongitude ~/immich-test/<Album>/<Dat
 Prüfen ob Datum und GPS korrekt gesetzt sind, bevor der Gesamtimport läuft.
 
 ## Nächster Schritt (Stand dieser Session)
-Test-Export lief erfolgreich nach Fix von exiftool-Installation. Umfang der Missing-Shared-Fotos ist jetzt bekannt (2.618). Nächster Schritt: Album-Aufschlüsselung aus `missing_shared.json` erstellen, Prioritätenliste der Alben nach Anzahl Missing-Fotos, dann Download-Läufe album-weise starten (klein zuerst als Zeitschätzung), parallel lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
+Test-Export lief erfolgreich nach Fix von exiftool-Installation. Umfang und Album-Verteilung der Missing-Shared-Fotos sind bekannt. Nächster Schritt: Testlauf mit Abschlussball_12.2015 zur Zeitschätzung, dann Download-Läufe album-weise absteigend nach Größe starten, parallel lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
