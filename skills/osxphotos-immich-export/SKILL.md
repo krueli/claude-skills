@@ -3,6 +3,19 @@
 ## Kontext
 Michael migriert ~16.000 Fotos von Apple Photos auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Fotos-Bibliothek liegt lokal. In geteilten Alben fehlen **2.618 Originale** (Stand dieser Session, ermittelt via `osxphotos query --shared --missing`), verteilt über sehr viele Reisealben von 2008 bis heute. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest, nicht aus separaten Sidecars.
 
+## ⚠️ Diagnose-Falle: RetryError/ValueError bei 100% eines Albums NICHT als Python/Pfad-Bug fehldeuten
+Wenn `osxphotos export` bei EINEM kompletten Album (alle Fotos, alle Dateitypen JPG/HEIC/MP4) mit
+`RetryError[<Future ... raised ValueError>]` durchfällt, andere Alben aber sauber laufen:
+**Erste Vermutung ist fast immer "fehlendes Original" (iCloud "Diesen Mac optimieren"), NICHT ein Python-Versions- oder Pfad-Encoding-Problem.**
+
+Schnelltest vor jeder tieferen Diagnose:
+```bash
+osxphotos query --album "<Albumname>" --missing | wc -l
+```
+Steht das Album schon in der Tabelle unten (z.B. Südostasien, Ostsee-Warnemünde), ist die Ursache geklärt — sofort zu `--download-missing` springen, nicht neu diagnostizieren.
+
+Der `RetryError`/`ValueError` in Verbose-Level 1 ist nur die tenacity-Hülle um einen gescheiterten automatischen Nachlade-Versuch. Mit `-VVV` wird daraus sauber `Skipping missing original photo ...` — das ist das eigentliche Signal, nicht der ValueError selbst.
+
 ## Setup
 - osxphotos läuft in eigenem venv: `osxphotos-env`
 - Version: 0.76.1 (Stand Juli 2026)
@@ -22,12 +35,15 @@ time osxphotos export ~/immich-missing/<Albumname> \
 ```
 `time` davor liefert die reale Laufzeit zum Abgleich mit der erwarteten Rate.
 
+**`DEST` muss vor dem Aufruf existieren** (`mkdir -p`) — osxphotos legt das Zielverzeichnis nicht selbst an und bricht sonst mit "Invalid value for 'DEST'" ab.
+
 ## Bekannte Stolperfallen
 1. **`--original-name` existiert nicht.** Richtige Option ist `--filename "{original_name}"`. osxphotos schlägt bei falschem Flag Alternativen vor (`--filename`, `--only-new`, `--original-suffix`).
 2. **Zielverzeichnis muss vorher existieren** (`mkdir -p` davor), sonst bricht der Export mit "Invalid value for 'DEST'" ab — und die Folgezeilen des Multi-Line-Befehls werden von zsh dann fälschlich als eigene Kommandos interpretiert ("command not found: --directory").
 3. **exiftool separat installieren.** osxphotos bringt es nicht mit. Ohne exiftool bricht `--exiftool` mit "Could not find exiftool" ab, egal ob der Rest der Befehlszeile korrekt ist.
 4. **`{original_name}` ist nicht immer zuverlässig.** Bei Fotos, die reimportiert oder bearbeitet wurden, kann das Feld leer sein — osxphotos fällt dann auf UUID-Namen zurück. Nach jedem Export-Batch stichprobenartig prüfen (`ls` im Zielordner), ob lesbare Dateinamen rauskommen.
 5. **Copy-Paste von Multi-Line-Befehlen ins Terminal** kann bracketed-paste-Escape-Codes (`[200~`, `~]`) mit einfügen → zsh-Fehler "bad pattern". Fix: `unset zle_bracketed_paste` in `~/.zshrc`, oder Befehl von Hand tippen.
+6. **RetryError/ValueError auf 100% eines Albums = fehlendes Original, nicht Python/Encoding.** Siehe Warnhinweis oben. Mit `-VVV` nachprüfen statt Python-Version oder Umlaute im Pfad zu verdächtigen.
 
 ## Feldauswahl bei --exiftool
 `--exiftool` hat KEINEN granularen Schalter, um nur bestimmte Felder (z.B. nur Datum + GPS) zu schreiben. Es schreibt ein festes Set: Datum, GPS, Keywords, Description, Title, ggf. Personen als Keywords.
@@ -98,4 +114,4 @@ exiftool -DateTimeOriginal -GPSLatitude -GPSLongitude ~/immich-test/<Album>/<Dat
 Prüfen ob Datum und GPS korrekt gesetzt sind, bevor der Gesamtimport läuft.
 
 ## Nächster Schritt (Stand dieser Session)
-2 von ~20 Alben mit fehlenden Originalen erledigt (Abschlussball_12.2015, Westcoast-Rundreise). Rate bestätigt sich als schnell und stabil (~2,24s/Foto bei größeren Batches). Nächster Schritt: restliche Alben absteigend nach Größe abarbeiten (nächstes: AIDA Spanien/Portugal, 251 Fotos), dann lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
+2 von ~20 Alben mit fehlenden Originalen erledigt (Abschlussball_12.2015, Westcoast-Rundreise). Südostasien (205) und Ostsee-Warnemünde (32) als "fehlendes Original"-Fälle bestätigt, noch nicht mit `--download-missing` nachgeladen. Rate bestätigt sich als schnell und stabil (~2,24s/Foto bei größeren Batches). Nächster Schritt: Südostasien und Ostsee-Warnemünde mit `--download-missing` fertig exportieren, dann restliche Alben absteigend nach Größe abarbeiten (nächstes: AIDA Spanien/Portugal, 251 Fotos), dann lokale Alben exportieren, danach Immich CLI Upload mit kleinem Batch vor Gesamt-Import.
