@@ -1,85 +1,79 @@
 # osxphotos Export für Immich-Migration
 
 ## Kontext
-Michael migriert ~19.750 Fotos (komplette Photos-Bibliothek, alle Alben) von Apple Photos auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Bibliothek liegt lokal unter `/Users/michaelkruger/Pictures/Photos Library.photoslibrary`. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest. Export-Zielordner: `~/immich-missing/<Albumname>` (ein Ordner pro Album, Slashes im Albumnamen werden zu `_`).
+Michael migriert die komplette Apple Photos Bibliothek (19.766 Fotos) auf selbst gehostete Immich-Instanz (datenbank.m-krueger.de). Bibliothek liegt lokal unter `/Users/michaelkruger/Pictures/Photos Library.photoslibrary`. Priorität: EXIF-Metadatenintegrität (Datum, GPS), da Immich diese Felder direkt aus der Datei liest. Export-Zielordner: `~/immich-missing/<Name>` (ein Ordner pro Album bzw. ein Sammelordner für nicht-albumierte Fotos).
 
-**Stand Ende Session 5: ALLE Alben der Bibliothek (geteilt + regulär, 54 Ordner) sind exportiert. Erster großer Immich-Import (20 Alben mit fehlenden Originalen) ist abgeschlossen und verifiziert. Zweiter Import (restliche 34 Alben) läuft/ist grade gelaufen.**
+**Stand Ende Session 6: Alle 54 Alben (geteilt + regulär) sind exportiert und importiert (6.485 Assets). Zusätzlich alle 13.822 nicht-albumierten Fotos exportiert (17.848 Dateien inkl. Live-Photo-Begleiter/bearbeitete Versionen, 55-59 GB) und werden gerade importiert — OHNE Album-Zuordnung (Immich-Timeline), da diese Fotos in Apple Photos auch in keinem Album waren.**
+
+## Nicht-albumierte Fotos (Session 6, neu)
+- Filter: `osxphotos export DEST --not-in-album --download-missing --exiftool --verbose` (osxphotos query-Flag `--not-in-album`, Gegenstück `--in-album`). Funktioniert auch für `timewarp` (gleiche Query-Flags über alle Commands hinweg).
+- Von 19.766 Fotos gesamt waren 13.822 in KEINEM Album (überraschend hoher Anteil, ~70%).
+- Nur 14 davon `path=None` (fehlend) — alle NICHT `shared`, sondern normale "iCloud optimiert Speicher"-Platzhalter mit korrektem tzoffset. Normales `--download-missing` (ohne AppleScript-Zwang) reicht.
+- 144 hatten `tzoffset=None` OHNE dass sie shared waren (alte Fotos 2012-2017, keine GPS-Daten). Da keine Reise-/GPS-Struktur zum Segmentieren vorhanden ist: pauschal auf Heimat-Zeitzone gesetzt via **benannte IANA-Zeitzone** (DST-automatisch!): `osxphotos timewarp --uuid-from-file <datei mit UUIDs> --timezone "Europe/Berlin" --force`. Deutlich einfacher als manuelle Offset-Berechnung, wenn ein Zeitraum mehrere Jahre/DST-Wechsel abdeckt. `--uuid-from-file` ist der richtige Weg, um eine gezielte UUID-Teilmenge zu behandeln, wenn keine Alben-Query passt (z.B. nur die tzoffset=None-Teilmenge, NICHT alle nicht-albumierten Fotos — sonst überschreibt man bei den anderen 13.678 Fotos die bereits korrekte Zeitzone!).
+- **Beim Immich-Import für diesen Sammelordner `-a`-Flag WEGLASSEN** (`immich upload -r <ordner>` ohne `-a`), sonst entsteht ein unerwünschtes künstliches Album mit dem Ordnernamen (z.B. "Ohne_Album"). Fotos landen dann korrekt nur in der Timeline, ohne Album-Zuordnung — spiegelt den Zustand in Apple Photos wider.
+- Bei ~13.822 Fotos (55GB) dauerte der Export ca. 45 Minuten (WhatsApp-Tempo als Vergleich: 1224 Fotos in 94s, hier deutlich langsamer wegen höherem Anteil an großen Dateien/PNGs/Screenshots).
+- 5 von 13.822 Fotos hatten einen Datei-Typ-Mismatch (Inhalt passt nicht zur Erweiterung, z.B. eine ".JPG" ist tatsächlich HEIF/MOV-Container) — exiftool verweigert zu Recht das Schreiben und meldet "Error exporting ... Error writing output file" bzw. "Not a valid JPEG (looks more like X)". **Wichtig: Das ist KEIN Datenverlust** — osxphotos kopiert die Datei ERST, versucht DANACH exiftool-Metadaten zu schreiben. Schlägt nur der exiftool-Schritt fehl, liegt die vollständige, gültige Bilddatei trotzdem schon im Zielordner (ohne die zusätzlichen exiftool-Tags wie Keywords/Album-Namen, aber mit allen original-eingebetteten Metadaten). Vor jedem "Recovery"-Versuch erst prüfen ob die Datei nicht ohnehin schon vollständig da ist (`file <pfad>` zur Validierung), bevor man Zeit in einen erneuten Export steckt.
 
 ## Immich-Import
 - CLI: `immich` (npm, `/Users/michaelkruger/.npm-global/bin/immich`, Version 2.7.5), Auth in `~/.config/immich/auth.yml` (URL enthält bereits `/api` — bei eigenen curl/API-Aufrufen NICHT doppelt anhängen, sonst 404).
-- Befehl: `immich upload -r -a <verzeichnis>` — `-r` rekursiv, `-a` erstellt automatisch ein Album pro Ordnername. Vorher immer `--dry-run`.
-- Album-Zuordnung passiert als separater Schritt NACH dem kompletten Upload aller Dateien — während des Uploads sind Fotos in der App kurzzeitig ohne Album sichtbar, das ist normal, kein Fehler.
-- Der Befehl ist idempotent: bereits hochgeladene Dateien werden per Hash als "duplicates" erkannt und übersprungen, neue Alben/Ordner werden beim erneuten Aufruf einfach ergänzt. Für den kompletten Bibliotheks-Import kann man daher einfach denselben `immich upload -r -a .` auf das gesamte `~/immich-missing`-Verzeichnis wiederholt laufen lassen, sobald neue Alben dazukommen.
-- Transiente Einzeldatei-Fehler ("TypeError: fetch failed") bei einzelnen großen Dateien sind normal, gleicher Befehl nochmal laufen lassen behebt sie (idempotent).
+- Für Alben-Ordner: `immich upload -r -a <verzeichnis>` (`-a` = automatische Albenerstellung pro Ordnername).
+- Für Sammelordner ohne Album-Zuordnung: `immich upload -r <verzeichnis>` (KEIN `-a`).
+- Vorher immer `--dry-run`. Bei großen Datenmengen (>10GB) dauert allein das Crawling/Hashing für den Dry-Run mehrere Minuten — im Hintergrund laufen lassen.
+- Album-Zuordnung passiert als separater Schritt NACH dem kompletten Upload aller Dateien.
+- Idempotent: bereits hochgeladene Dateien werden per Hash als "duplicates" erkannt und übersprungen. Transiente Einzeldatei-Fehler ("TypeError: fetch failed") → gleichen Befehl nochmal laufen lassen.
 - Album-Liste mit Assetzahlen: `curl -s -H "x-api-key: $(grep '^key:' ~/.config/immich/auth.yml | awk '{print $2}')" "$(grep '^url:' ~/.config/immich/auth.yml | awk '{print $2}')/albums"` (JSON, Feld `assetCount`).
-- Ergebnis erster Import (Session 4): 20 Alben, 3.133 Assets, 3,1 GB effektiv neu.
-- Zweiter Import (Session 5): 34 weitere Alben (alle geteilten Alben mit fehlenden Originalen die noch offen waren + alle regulären/lokalen Alben), ~3.735 neue Dateien, ~8 GB.
+- **Upload-Tempo variiert stark:** 9,8GB/3143 Dateien ≈ 28 Min; 8GB/3735 Dateien ≈ 25 Min (schwankt je nach Dateigröße/Servertagesform). Bei sehr großen Batches (>50GB) mehrere Stunden einplanen.
 
-## ⚠️⚠️ NEU (Session 5): Bestimmte Zielordner-NAMEN (nicht Albumnamen!) lassen `osxphotos export` mit RetryError/ValueError bei JEDEM Foto scheitern
-Betroffen waren u.a. "Schrammsteine -Sächsische Schweiz", "Sprüche", "Hafling_Südtirol" — alle drei enthalten Umlaute, aber auch "Südostasien" und "Ostsee-Warnemünde" (funktionierten einwandfrei) haben Umlaute, also ist es NICHT einfach "Umlaut im Pfad". Der exakte Trigger ist nicht abschließend geklärt (vermutlich ein Escaping-Bug beim Aufbau des exiftool-Subprozess-Kommandos für bestimmte Zeichen-/Längen-Kombinationen im Zielpfad), aber das Symptom ist eindeutig:
+## Import-Historie
+| Batch | Dateien | Größe | Alben | Ergebnis |
+|---|---|---|---|---|
+| 1 (Session 4) | 3.143 | 9,8 GB | 20 (mit `-a`) | 3.133 Assets, 5 transiente Fehler beim Retry behoben |
+| 2 (Session 5) | 3.735 neu | 8 GB | 34 weitere (mit `-a`) | 0 Fehler, Gesamt 6.485 Assets in 54 Alben |
+| 3 (Session 6) | 17.847 | 59,2 GB | keine (ohne `-a`, Timeline) | läuft/lief |
 
-**Diagnose:** `osxphotos export <ZIEL> --album <NAME> ...` schlägt für JEDES einzelne Foto im Album mit `RetryError[<Future ... raised ValueError>]` fehl — auch nach `rm -rf` des Zielordners, auch ohne `--filename`-Template, auch bei erneutem Ausführen (kein transientes Problem). Direkter Python-Aufruf (`PhotoExporter(photo).export(...)`) auf dasselbe Foto funktioniert einwandfrei — das Foto/Album selbst ist NICHT das Problem.
+## ⚠️ Zielordner-NAMEN-Bug: bestimmte Namen lassen `osxphotos export` mit RetryError/ValueError bei JEDEM Foto scheitern
+Betroffen waren "Schrammsteine -Sächsische Schweiz", "Sprüche", "Hafling_Südtirol". Exakter Trigger unklar (nicht einfach "Umlaut" — "Südostasien"/"Ostsee-Warnemünde" funktionierten problemlos). **Diagnose:** Export schlägt für JEDES Foto im Album fehl, auch nach `rm -rf` des Zielordners, auch ohne `--filename`-Template. Direkter Python-Aufruf (`PhotoExporter(photo).export(...)`) auf dasselbe Foto funktioniert einwandfrei. **Test:** Export mit demselben `--album`, aber simplem Zielordnernamen (`/tmp/test123`) — funktioniert das, liegt es am Zielordner-NAMEN. **Workaround:** In temporären, simpel benannten Ordner exportieren, danach mit `mv` auf korrekten Namen umbenennen.
 
-**Test zur Bestätigung:** Export mit demselben `--album`-Wert aber einem simplen Zielordnernamen (z.B. `/tmp/test123`) durchführen — funktioniert das, liegt es am Zielordner-NAMEN, nicht am Album/den Fotos.
+## Die drei wichtigsten osxphotos-Export-Fallstricke (Session 2+3)
 
-**Workaround:** In einen temporären, simpel benannten Ordner exportieren (z.B. `_tmp_<kurzname>`), danach mit `mv` auf den korrekten finalen Albumnamen umbenennen:
-```bash
-mkdir -p "_tmp_x"
-osxphotos export "_tmp_x" --album "<Problematischer Name>" --download-missing --exiftool --verbose
-mv "_tmp_x" "<Problematischer Name>"
-```
-Bei jedem neuen Album mit Sonderzeichen im Namen, das mit demselben RetryError-Muster bei 100% der Fotos fehlschlägt (nicht nur bei den tatsächlich fehlenden Originalen), zuerst mit einem simplen Testordnernamen verifizieren, ob es an diesem Bug liegt, bevor man tiefer in Richtung "fehlendes Original"/Zeitzone diagnostiziert.
+### 1. `--use-photokit` funktioniert NICHT für CLI-Skripte (SIGABRT/TCC-Crash)
+Nie verwenden. Ersatz: `ExportOptions(download_missing=True, use_photos_export=True, exiftool=True)` + `PhotoExporter` (AppleScript-Automation der autorisierten Photos-App). Fertiges Skript: `~/immich-missing/export_shared_album.py "<Albumname>"` — nur nötig für Alben die zu **100%** aus fehlenden/Cloud-only-Fotos bestehen. Bei **gemischten** Alben funktioniert normale CLI mit `--download-missing --exiftool` zuverlässig und schneller.
 
-## Die drei wichtigsten Fallstricke beim osxphotos-Export (Session 2+3)
-
-### 1. `--use-photokit` / `use_photokit=True` funktioniert grundsätzlich NICHT für CLI-Skripte
-Führt zu `SIGABRT` (TCC-Crash: fehlendes App-Sandbox-Entitlement). Nie verwenden. **Funktionierender Ersatz:** AppleScript-Automation der bereits autorisierten Photos-App via `ExportOptions(download_missing=True, use_photos_export=True, exiftool=True)` + `PhotoExporter`. Fertiges Skript: `~/immich-missing/export_shared_album.py "<Albumname>"` — nur nötig für Alben, die zu **100%** aus fehlenden/Cloud-only-Fotos bestehen (dort schlägt die normale CLI mit `--download-missing` fehl, siehe Diagnose-Falle unten). Bei **gemischten** Alben (nur ein Teil fehlt) funktioniert die normale CLI mit `--download-missing --exiftool` zuverlässig und ist schneller (kein AppleScript-Zwang für die bereits lokalen Fotos).
-
-### 2. Geteilte/Cloud-Only-Fotos haben `tzoffset=None` → `--exiftool` schreibt Datum in falscher Zeitzone
-Alle Fotos mit `path=None`/`shared=True` haben `photo.tzoffset == None`. `--exiftool` schreibt dann UTC mit `OffsetTimeOriginal +00:00` — ehrlich, aber falsche Lokalzeit (bei großen Zeitverschiebungen falsches Kalenderdatum).
-
-**Fix-Workflow (VOR dem finalen Export):**
-1. GPS-Koordinaten pro Datum auswerten (`p.location`, gruppiert nach `p.date.date()`), Reiseabschnitte/Länder identifizieren.
-2. Nachbarländer mit unterschiedlicher Zeitzone trotz gemeinsamer Grenze beachten: Spanien (MEZ/MESZ) vs. Portugal (WET/WEST). Kanaren+Madeira nutzen WET, nicht spanisches Festland-MEZ.
-3. US-Bundesstaaten: Eastern/Central-Grenze durch TN/AL/FL-Panhandle. Arizona keine DST. Nevada = Pacific trotz Nachbarschaft zu Mountain-Staaten.
-4. Route bei Unsicherheit mit Nutzer verifizieren, bei "weiß nicht mehr" plausibelste Annahme (Zielort-Heuristik) nehmen und dokumentieren.
-5. Pro Segment: `osxphotos timewarp --album "<Album>" --from-date YYYY-MM-DD --to-date YYYY-MM-DD --timezone +HH:MM --force`. Albumnamen mit `/` → `//` escapen. `--to-date` exklusiv. Ohne `--match-time`. Vorher `--inspect` zur Kontrolle. `--force` nötig ohne TTY.
-6. Bereits vorhandene Exporte komplett löschen (`rm -rf`) vor Neu-Export — außer bei separatem regulärem Album gleichen Namens (siehe Fallstrick 3).
-7. Stichprobe: `exiftool -DateTimeOriginal -OffsetTimeOriginal -GPSLatitude -GPSLongitude <Datei>`.
+### 2. Geteilte/Cloud-Only-Fotos (und manche alte lokale Fotos ohne GPS) haben `tzoffset=None` → `--exiftool` schreibt Datum in falscher Zeitzone
+`photo.date` wird als UTC zurückgegeben, `--exiftool` schreibt `OffsetTimeOriginal +00:00` — ehrlich aber falsche Lokalzeit. Fix: GPS-Route pro Datum analysieren → Zeitzone(n) bestimmen (Nachbarländer wie Spanien/Portugal, US-Bundesstaaten-Grenzen beachten) → `osxphotos timewarp --album/--uuid-from-file ... --timezone +HH:MM|IANA-Name --force` (ohne `--match-time`) → GENAU DIESE UUIDs/Alben treffen, nicht versehentlich Fotos mit bereits korrekter Zeitzone überschreiben → Zielordner löschen und neu exportieren.
 
 ### 3. Alte, vor dem Zeitzonen-Fix exportierte Dateien im Zielordner erzeugen stille Duplikate
-Erkennbar an vorhandener `.osxphotos_export.db`. Bei Namenskollision hängt osxphotos ` (1)`, ` (2)` an statt zu überschreiben → alte (falsche Zeitzone) und neue (korrekt) Version liegen doppelt. Sicherer Fix: aus Export-Log `(N)`-Suffix-Paare extrahieren, per gebündeltem `exiftool -j -GPSLatitude# -GPSLongitude# -DateTimeOriginal <alt> <neu>` vergleichen (GPS/Datum-Match → alte löschen, Mismatch → beide behalten, zufällige Namensgleichheit). Bei Videos zusätzlich Duration/FileSize. **Sauberste Lösung: bei künftigen Alben immer erst `rm -rf`, dann frisch exportieren** — vorher prüfen ob separates reguläres Album gleichen Namens existiert (dessen Fotos NICHT löschen, die haben korrekten tzoffset).
+Erkennbar an vorhandener `.osxphotos_export.db`. Bei Namenskollision hängt osxphotos ` (1)`, ` (2)` an statt zu überschreiben. Fix: `(N)`-Suffix-Paare aus Log extrahieren, per gebündeltem `exiftool -j -GPSLatitude# -GPSLongitude# -DateTimeOriginal <alt> <neu>` vergleichen (Match → alte löschen, Mismatch → beide behalten). **Sauberste Lösung: bei künftigen Exporten immer erst `rm -rf`, dann frisch exportieren** — vorher auf separates reguläres Album gleichen Namens prüfen.
 
-## Diagnose-Falle: RetryError/ValueError bei 100% eines Albums NICHT vorschnell als Python/Pfad-Bug fehldeuten
-Zwei mögliche Ursachen, in dieser Reihenfolge prüfen:
-1. **Zielordner-Name-Bug (siehe oben, Session 5 NEU):** Test mit simplem Zielordnernamen (`/tmp/test123`) — funktioniert das, ist es der Ordnername.
-2. **Fehlendes Original (path=None, 100% des Albums):** `osxphotos query --album "<Albumname>" --missing | wc -l` — steht die Zahl nah an der Albumgröße, ist es das. Braucht dann `export_shared_album.py` (AppleScript-Zwang) statt normaler CLI.
+## Diagnose-Falle: RetryError/ValueError bei 100% eines Albums
+Zwei mögliche Ursachen: 1) Zielordner-Name-Bug (Test mit `/tmp/test123`), 2) fehlendes Original bei 100% des Albums (`osxphotos query --album X --missing | wc -l`).
 
 ## Setup
-- osxphotos venv: `osxphotos-env` (Python 3.14.6, Homebrew python@3.14 Framework-Build), Version 0.76.1
+- osxphotos venv: `osxphotos-env`, Python 3.14.6, osxphotos 0.76.1
 - exiftool: `/usr/local/bin/exiftool`
-- Volle Festplattenzugriff für die ausführende App/Terminal aktiviert, sonst `PermissionError` beim Kopieren der `Photos.sqlite`
-- Bei CLI-Export in einen Ordner mit vorhandener `.osxphotos_export.db`: interaktiver Bestätigungsprompt ("continue without --update?") — braucht `echo y |` vorangestellt oder `--update`-Flag, sonst Crash-Log bei nicht-interaktiver Ausführung.
+- Volle Festplattenzugriff für ausführende App/Terminal aktiviert
+- CLI-Export in Ordner mit vorhandener `.osxphotos_export.db`: braucht `echo y |` oder `--update`, sonst Crash ohne TTY.
+- `timewarp` ohne `--force` crasht ohne TTY (`click.confirm`).
 
 ## Bekannte Stolperfallen (kompakt)
-1. `--original-name` existiert nicht → `--filename "{original_name}"` (Achtung: kann bei Fotos mit ungewöhnlichen/leeren Originalnamen selbst zum RetryError führen — im Zweifel `--filename` weglassen, Default-Verhalten nutzt ohnehin `original_filename`).
+1. `--filename "{original_name}"` kann bei Fotos mit ungewöhnlichen/leeren Originalnamen selbst zum RetryError führen → im Zweifel weglassen, Default nutzt ohnehin `original_filename`.
 2. Zielverzeichnis muss vorher existieren (`mkdir -p`).
 3. exiftool separat installieren.
-4. Bracketed-paste-Artefakte bei Copy-Paste → `unset zle_bracketed_paste`.
-5. RetryError/ValueError auf 100% eines Albums → siehe Diagnose-Falle oben (zwei mögliche Ursachen).
-6. `--use-photokit` = SIGABRT-Crash, nie verwenden.
-7. `tzoffset=None` bei geteilten Alben → Datum falsch, siehe Fallstrick 2.
-8. `osxphotos timewarp` ohne `--force` crasht ohne TTY.
-9. Albumnamen mit `/` → im Zielordnernamen zu `_` sanitizen, bei `timewarp --album` als `//` escapen.
-10. Alte Exporte im Zielordner vor Zeitzonen-Fix → stille Duplikate, siehe Fallstrick 3.
-11. Bestimmte Zielordner-Namen (Sonderzeichen-Kombination) → RetryError bei 100% der Fotos, siehe NEU-Abschnitt oben. Workaround: temporärer Ordnername + `mv`.
-12. Immich-Auth-URL in `~/.config/immich/auth.yml` enthält bereits `/api` — bei eigenen curl-Aufrufen nicht doppelt anhängen.
-13. CLI-Export in Ordner mit vorhandener `.osxphotos_export.db` braucht `echo y |` oder `--update`, sonst Crash ohne TTY.
+4. RetryError/ValueError auf 100% eines Albums → siehe Diagnose-Falle.
+5. `--use-photokit` = SIGABRT, nie verwenden.
+6. `tzoffset=None` → Datum falsch, siehe Fallstrick 2 oben. Betrifft auch NICHT-shared alte Fotos ohne GPS (nicht nur shared/cloud-only).
+7. `osxphotos timewarp` ohne `--force` crasht ohne TTY.
+8. Albumnamen mit `/` → im Zielordnernamen zu `_` sanitizen, bei `timewarp --album` als `//` escapen.
+9. Alte Exporte im Zielordner vor Zeitzonen-Fix → stille Duplikate.
+10. Bestimmte Zielordner-Namen → RetryError bei 100% der Fotos, siehe Bug oben. Workaround: temporärer Ordnername + `mv`.
+11. Immich-Auth-URL enthält bereits `/api` — bei curl nicht doppelt anhängen.
+12. `--not-in-album` für Fotos ohne Albumzugehörigkeit; beim Import dieser Fotos `-a` WEGLASSEN.
+13. Exiftool-Fehler ("Error writing output file", "Not a valid JPEG") bei einzelnen Dateien = Datei-Typ-Mismatch im Quellmaterial — Basisdatei liegt trotzdem schon vollständig im Zielordner, kein Datenverlust, vor Recovery-Versuch erst prüfen.
 
-## Vollständiger Alben-Bestand (Stand Session 5, alle exportiert)
-54 Ordner unter `~/immich-missing/`: alle 20 geteilten Alben mit ursprünglich fehlenden Originalen (siehe Session-3-Historie, alle zeitzonenkorrigiert), plus 7 weitere geteilte Alben mit teilweise fehlenden Originalen (Teneriffa, Gardasee 2019, Fuerteventura, Hafling_Südtirol, Mallorca - Calla Millor, Reiten Grimma, Abschlussball_03.2016 — alle ebenfalls zeitzonenkorrigiert), plus Texel und Wien 2014 (geteilt, keine fehlenden Originale), plus 26 reguläre/lokale Alben (WhatsApp, AIDA Ostsee Route, Sprüche, Frankreich-Nancy, Silvester 2016, Familie, Aquarium, Wien 2014 [gemergt mit geteiltem], Klassentreffen 2018, Abschlussball 12_2015, Rezepte, Josi, Hohem Joy, Englischunterricht, Instagram, Mutti, Weber Grillkurs 02.10.2014, Geheimakte Zahn, Schrammsteine -Sächsische Schweiz, Bike, Bewerbungsfotos, InstantSave, Silvester, Unheilig, Abschlussball 03-2016, Balkonkraftwerk). Reguläre Fotos haben immer korrekten tzoffset (kein Zeitzonen-Fix nötig).
-
-**Wichtig:** "Abschlussball 12_2015"(regulär,31) und "Abschlussball_12.2015"(geteilt,31) sowie "Abschlussball 03-2016"(regulär,10) und "Abschlussball_03.2016"(geteilt,8) sind trotz ähnlicher Namen/Zahlen KOMPLETT unterschiedliche Fotosets (0 UUID-Überschneidung, verifiziert) — bewusst als separate Alben/Ordner behandelt, nicht zusammengeführt.
+## Vollständiger Stand (Ende Session 6)
+- 54 Alben (geteilt + regulär) exportiert und importiert: 6.485 Assets.
+- 13.822 nicht-albumierte Fotos exportiert (17.848 Dateien, 55-59 GB), Import läuft/lief ohne Album-Zuordnung.
+- Damit wäre die GESAMTE Bibliothek (19.766 Fotos) migriert, sobald der letzte Import fertig ist und verifiziert wurde.
 
 ## Nächster Schritt
-Alle Alben exportiert und (zweiter Batch) nach Immich importiert. Nach Abschluss des zweiten Imports: Ergebnis via Album-API verifizieren (Anzahl Alben=54, Assetzahlen plausibilisieren), stichprobenartig EXIF-Korrektheit bei den neu zeitzonenkorrigierten Alben (Teneriffa, Gardasee 2019, Fuerteventura, Hafling_Südtirol, Mallorca-CallaMillor, Reiten Grimma, Abschlussball_03.2016) prüfen. Danach: Bibliotheks-weite Vollständigkeit gegenchecken (Photos.app hat 19.753 Fotos gesamt inkl. Fotos ohne Albumzugehörigkeit — ob diese auch migriert werden sollen, ist noch nicht geklärt/gewünscht, bisher nur Album-Mitglieder exportiert).
+Nach Abschluss des dritten Imports: Server-Statistik prüfen (`immich server-info`, sollte ~6.485 + ~17.847 = ~24.332 Assets zeigen, ggf. minus Content-Duplikate), stichprobenartig EXIF-Korrektheit der 144 heimatzeitzone-korrigierten alten Fotos prüfen. Danach ist die komplette Photos-Bibliothek-Migration nach Immich abgeschlossen — kein osxphotos-Export-Thema mehr offen, außer der Nutzer möchte die 2 Alben mit unsicheren Zeitzonen-Annahmen (Westcoast-Rundreise 25.8., AIDA Spanien/Portugal 13./16.10.) nachträglich verifizieren.
